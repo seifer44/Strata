@@ -171,6 +171,26 @@ def _print_check(report: dict) -> None:
         print("  An engine is serving; an update waits until it stops.")
 
 
+def hardware_for_request(backend: str | None) -> dict:
+    """The hardware an update works with. A make asked for by name is probed for that make: the AMD card is
+    only probed on the HIP path (``detect_hardware`` below), so on a PC that has an NVIDIA adapter beside
+    it the auto backend is CUDA and the plain probe leaves ``gfx`` and ``gpu_names`` empty. Overwriting the
+    backend afterwards then leaves the package search with no evidence at all, and it answers that the card
+    was not recognised instead of naming the build (#4013). No ask: the probe stays as it is."""
+    from strata_control import engine_component as ec, updater
+    hardware = updater.detect_hardware()
+    if not backend:
+        return hardware
+    family, variant = ec.split_backend(backend)    # "hip-rdna2" is the hip family and its rdna2 package (#4013)
+    if family in ec.BACKEND_MATRIX and family != hardware["backend"]:
+        hardware = updater.detect_hardware({**os.environ, ec.ENV_BACKEND: family})
+    hardware["backend"] = family
+    if variant:
+        hardware["variant_wanted"] = variant
+    hardware["backend_source"] = "requested"             # the person's own decision: the make guard lets it through
+    return hardware
+
+
 def run(a) -> int:
     from strata_control import acquisition, engine_component as ec, feed as feedmod, signing, updater
     machine = a.output in ("json", "jsonl")
@@ -184,12 +204,7 @@ def run(a) -> int:
 
     root = Path(a.components_dir) if a.components_dir else ec.components_dir()
     try:
-        hardware = updater.detect_hardware()
-        if a.backend:
-            hardware["backend"], variant = ec.split_backend(a.backend)    # --backend hip-rdna2 = the hip family, the rdna2 package (#4013)
-            if variant:
-                hardware["variant_wanted"] = variant
-            hardware["backend_source"] = "requested"             # the person's own decision: the make guard lets it through
+        hardware = hardware_for_request(a.backend)
         lines: list = []
         cancel = threading.Event()
         ctx = updater.Context(components=root, source="", trusted={}, hardware=hardware, emit=_emit_factory(a, lines), cancel=cancel,

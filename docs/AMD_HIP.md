@@ -146,6 +146,14 @@ source-checkout option for developers, not a way to start the released app.
 - **Before the model download,** setup runs `engine\strata-device.exe --list-devices`. If the HIP runtime does not see the
   card, setup stops and points to the driver. With an integrated Radeon, a discrete card is HIP device 1, not 0; `--gpu N` and
   the config's `"gpu"` are HIP numbers.
+- **A PC with an NVIDIA card beside the AMD card:** the PC's own choice is the NVIDIA card first, so a plain
+  start and a plain update pick the CUDA engine and the AMD card is never offered. Name the make: `strata
+  launch --backend amd` uses the AMD engine and keeps that choice for the next start (`strata launch --backend
+  auto` goes back to the PC's own choice). Ask the update for the AMD engine: `strata update --backend hip`
+  probes the AMD card and takes the package for it (`strata update --backend hip-rx9070` names one build).
+  The card's own code still decides the build: on a gfx1201 card the `rx9070` package is chosen even when
+  another build is named. [MULTI_GPU.md](MULTI_GPU.md) says what one engine drives when both makes are in
+  one PC.
 - **Several cards:** use the app's card selector or `strata launch --gpu 0,1`. [MULTI_GPU.md](MULTI_GPU.md) lists the
   combinations measured. A tested Linux pair does not validate the same pair on Windows.
 - **VRAM budget:** `hipMemGetInfo` on Windows does not subtract what the desktop and other programs hold. The engine lowers

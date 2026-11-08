@@ -6,9 +6,15 @@ already fixed in split_backend below.
 
 The card list is the reporter's own output (2026-10-28/10-31): a GTX 1660 Ti (compute capability 7.5,
 6 GB), an RX 9070 XT (gfx1201, 16 GB) and an integrated Radeon. The display-class registry lists all
-three, and the code maps the discrete card by its PCI id (DEV_7550 = 0x7550, in WIN_AMD_DEVICE_ARCH)."""
+three, and the code maps the discrete card by its PCI id (DEV_7550 = 0x7550, in WIN_AMD_DEVICE_ARCH).
+
+The auto pick is pinned by auto_backend below instead of read from the machine: a mixed PC answers AMD once
+a make choice is saved in the settings file (launch/cmd.py:865 save_backend) or an engine of that make is
+installed, and that machine state is not this case's to depend on. Run on the workstation on 2026-11-08, the
+unpinned cases read the PC's saved choice and three of them answered AMD for the auto pick."""
 from __future__ import annotations
 
+import os
 import unittest
 from unittest import mock
 from contextlib import ExitStack
@@ -39,8 +45,18 @@ FEED = [engine_package("0.1.52", "cuda", "cuda13", ("sm_75", "sm_86", "sm_89", "
         engine_package("0.1.52", "hip", "rdna2", ("gfx1030", "gfx1031"))]
 
 
+def auto_backend(environ=None):
+    """A pinned stand-in for ec.detect_backend: this PC's own pick is CUDA from the display adapters, and a
+    make the code itself puts in the environment still wins over it. The real detect_backend also reads the
+    settings file (a `strata launch --backend amd` saved choice, `save_backend` at launch/cmd.py:865), and on a
+    mixed PC that answers AMD for every case; the fixture pins it instead."""
+    forced = ec.split_backend((environ if environ is not None else os.environ).get(ec.ENV_BACKEND, ""))[0]
+    return (forced or "cuda"), ("environment" if forced else "display adapters")
+
+
 class OnAWindowsPcWithBothMakes(unittest.TestCase):
-    """Every case runs the real probes over the reporter's adapter list, with no GPU tool installed."""
+    """Every case runs the real probes over the reporter's adapter list, with no GPU tool installed and a
+    pinned auto pick, so the cases hold on a PC that has a saved make choice or an installed engine."""
 
     def setUp(self):
         stack = ExitStack()
@@ -48,17 +64,22 @@ class OnAWindowsPcWithBothMakes(unittest.TestCase):
         for target, attribute, kwargs in ((ec, "windows_display_adapters", {"return_value": MIXED}),
                                           (ec, "host_platform", {"return_value": WIN}),
                                           (updater, "host_platform", {"return_value": WIN}),
+                                          (ec, "detect_backend", {"side_effect": auto_backend}),
+                                          (ec, "saved_backend", {"return_value": None}),
                                           (ec.shutil, "which", {"return_value": None}),
                                           (ec.os, "name", {"new": "nt"})):
             stack.enter_context(mock.patch.object(target, attribute, **kwargs))
 
     def detect_once(self):
-        """Patch detect_hardware so a test can see how often it ran and with which environment."""
+        """Patch detect_hardware so a test can see how often it ran and with which environment. The shell's own
+        make choice is cleared first: a workstation that runs these cases with STRATA_ENGINE_BACKEND set, or with
+        a saved choice in its settings file, would otherwise answer AMD for the auto pick in every case."""
         calls, real = [], updater.detect_hardware
+        ambient = {k: v for k, v in os.environ.items() if k != ec.ENV_BACKEND}
 
         def once(environ=None):
             calls.append(environ)
-            return real(environ)
+            return real({**ambient, **(environ or {})})
 
         mock.patch.object(updater, "detect_hardware", side_effect=once).start()
         self.addCleanup(mock.patch.stopall)

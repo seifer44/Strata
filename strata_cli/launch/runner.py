@@ -952,6 +952,7 @@ class Runner:
         except Exception:        # noqa: BLE001  a name the list does not hold, or a list that cannot be read here, is setup's
             pass                 # to report: passing the values on unchanged keeps the launch behaving as it did before
         args = ["--yes", "--no-start", "--family", str(fam), "--model", str(model)]
+        args += self.setup_backend_args()        # a make the person named is setup's to take, too (#4075)
         ctx = s.context
         if ctx:
             args += ["--context", str(ctx)]
@@ -1002,6 +1003,27 @@ class Runner:
                     i += 2 if i + 1 < len(args) and not args[i + 1].startswith("--") else 1
             args = out
         return args
+
+    def setup_backend_args(self) -> list[str]:
+        """setup.py's --backend for the install job, only when the person named a make for this start.
+        A PC that has an NVIDIA card beside an AMD card answered the two halves differently: the Terminal takes
+        the make asked for (launch/cmd.py:863 puts it in STRATA_ENGINE_BACKEND for this launch, and :857 takes
+        it away for --backend auto) and numbers the cards of that make, while the install job ran setup.py with
+        no --backend, whose own pick is the NVIDIA card first when both makes are here (setup.py:10261/10262),
+        and that job checked the Terminal's number against its own card list (`found = gpus()` at setup.py:7680,
+        `check_gpus([gpu], found)` at :7696) - so every card the Terminal named was refused with "not found on
+        this PC", and its hint named the NVIDIA card. Passing the make makes the job take the AMD branch
+        (setup.py:10261 `hip = a.backend == "hip" or ...`), whose card list holds the AMD card and whose numbers
+        are mapped to the engine's HIP numbers by hip_match/hip_card (setup.py:4936/:4945), over the AMD list
+        amd_gpus_windows builds (setup.py:4767). Nothing in the
+        environment: nothing is added, so the release's argv stays as it is, and a saved make choice
+        (engine_backend in the settings file) keeps setup.py's own pick - that path is a scope question, not
+        something to change here. The Mac's setup takes no --backend (its choices at setup.py:10093 are cuda,
+        hip, sycl), and a name that is not a make of card is not passed on."""
+        from strata_control import engine_component as ec
+        name = os.environ.get(ec.ENV_BACKEND, "")
+        family = ec.clean_backend_name(ec.split_backend(name)[0] or name)   # "hip-rx9070" is the hip family, its build stays setup's
+        return ["--backend", family] if family else []
 
     def installed_card_args(self) -> list[str]:
         """--gpu-roles / --gpus of the installed config when the launch names no cards itself. A change of context or pictures runs setup again;

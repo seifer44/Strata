@@ -94,5 +94,37 @@ class CardChoice(unittest.TestCase):
                                              base={"gpu": 0, "gpus_asked": True}))
 
 
+    def notices(self, cards, base, chosen, backend="amd"):
+        cat = self.computer(cards, backend)
+        run = R.Runner(S.LaunchSettings(family="coder", model="IQ1_M"), catalog=cat)
+        run.say_remembered_cards(base, chosen)
+        return run.notices
+
+    def test_the_note_says_the_card_that_moved_and_not_the_one_left_behind(self):
+        got = self.notices(self.workstation(), {"gpu": 0, "gpus_asked": True}, [1])
+        self.assertEqual(len(got), 1)
+        self.assertIn("installed config names card 0", got[0])
+        self.assertIn("this start uses card 1 instead", got[0])
+        self.assertIn("--gpu 1", got[0])
+        self.assertNotIn("stays on", got[0])          # the old line described a run that does not happen
+
+    def test_a_stale_choice_with_two_cards_that_counts_names_both(self):
+        cards = self.workstation() + [{"index": 2, "name": "AMD Radeon RX 7900 XT", "vendor": "amd",
+                                       "vram_gb": 19.6, "arch": "gfx1100"}]
+        cat = self.computer(cards)
+        chosen = R.cards_for_launch(S.LaunchSettings(family="coder", model="IQ1_M"), cat,
+                                    base={"gpu": 0, "gpus_asked": True})
+        got = self.notices(cards, {"gpu": 0, "gpus_asked": True}, chosen)
+        self.assertEqual(len(got), 1)
+        self.assertIn("installed config names card 0", got[0])
+        self.assertIn("--gpu ", got[0])
+        self.assertNotIn("stays on", got[0])
+
+    def test_a_choice_that_counts_still_says_nothing_on_a_one_card_pc(self):
+        self.assertEqual(self.notices(self.workstation(), {"gpu": 1, "gpus_asked": True}, None), [])
+
+    def test_an_unrecorded_config_says_nothing(self):
+        self.assertEqual(self.notices(self.workstation(), {"gpu": 1, "gpus_asked": False}, None), [])
+
 if __name__ == "__main__":
     unittest.main()

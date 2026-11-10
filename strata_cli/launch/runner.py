@@ -399,13 +399,24 @@ def cards_for_launch(s: S.LaunchSettings, catalog, ram_gb: float | None = None, 
         usable_now = catalog.computer().usable_gpus
     except Exception:                                        # noqa: BLE001 - without the card list a saved card is kept, as before
         usable_now = None
-    if installed_cards(base, usable_now) or (isinstance(base, dict) and base.get("gpu_roles")):
+    inherited = installed_cards(base, usable_now)
+    # A card another Strata wrote into the installed config can be one this PC's card list ignores: an integrated
+    # Radeon beside a card with memory of its own, a card under 4 GB, or a number that names no card here. The
+    # workstation measured it: a Qwen coder config written by the app names "gpu": 0, the start kept it, and the
+    # engine stopped on "GPU 0 (AMD Radeon(TM) Graphics, gfx1036) is not an architecture this Strata engine was
+    # compiled for (gfx1200,gfx1201)" - the HIP ordinal of the integrated chip. A choice the card list ignores
+    # cannot stay, so it is treated as stale and the rule below chooses again, as if nothing had been recorded.
+    usable_ids = {int(c.get("index", 0)) for c in (usable_now or [])}
+    stale = bool(inherited) and bool(usable_ids) and not all(i in usable_ids for i in inherited)
+    if (inherited and not stale) or (isinstance(base, dict) and base.get("gpu_roles")):
         return None
     try:
         from strata_control import gpu_roles
         comp = catalog.computer()
         if len(comp.usable_gpus) < 2:
-            return None
+            if not stale:                 # one card that counts and a choice that fits it: the choice stays (as before)
+                return None
+            return [int(comp.usable_gpus[0].get("index", 0))] if comp.usable_gpus else None
         cards = gpu_roles.rows(comp.gpus, comp.engine_vendor)
         if comp.engine_vendor == "amd" and ((isinstance(base, dict) and base.get("arch") == "deepseek41")
                                             or getattr(s, "family", None) == "deepseek41"):

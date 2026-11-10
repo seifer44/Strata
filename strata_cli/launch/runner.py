@@ -1701,13 +1701,14 @@ class Runner:
             previous = None
         if not isinstance(previous, dict):
             previous = None
+        chosen_cards = cards_for_launch(self.s, self.catalog, base=base)   # said once here and to the note below, so the line matches the run
         cfg = derive_config(base, self.s, bool_flags=tune_knobs.BOOL_FLAGS,
-                            log=str(launch_dir() / f"{self.name}.engine.log"), gpus=cards_for_launch(self.s, self.catalog, base=base),
+                            log=str(launch_dir() / f"{self.name}.engine.log"), gpus=chosen_cards,
                             prev=previous)
         if self.s.gpus and not self.s.gpu_roles:             # a DeepSeek model on AMD keeps the card the person names from now on (strata_control/gpu_pick.py)
             from strata_control import gpu_pick
             gpu_pick.remember(base_path, [int(g) for g in self.s.gpus])
-        self.say_remembered_cards(base)
+        self.say_remembered_cards(base, chosen_cards)
         self.apply_four_card(cfg)
         self.use_own_dsv41_engine(cfg)
         self.apply_split_engine(cfg)
@@ -1765,16 +1766,31 @@ class Runner:
         self.notices.append(line)
         self.emit("config", line, None)
 
-    def say_remembered_cards(self, base: dict) -> None:
+    def say_remembered_cards(self, base: dict, chosen: "list[int] | None" = None) -> None:
         """A launch that names no cards keeps the cards the person chose earlier (`--gpu 0` is remembered by the model's settings).  On a PC with more
-        cards than that, one line says so and how to use them all, so a one-card start is never a surprise (AMD says the same when the card is named)."""
+        cards than that, one line says so and how to use them all, so a one-card start is never a surprise (AMD says the same when the card is
+        named).  A choice that names a card this PC's card list ignores does not stay (see cards_for_launch): the line says what moved instead."""
         s = self.s
         if s.gpus or s.gpu_roles:
             return
         try:
-            usable = [int(g.get("index", 0)) for g in self.catalog.computer().usable_gpus]
-            kept = installed_cards(base, self.catalog.computer().usable_gpus)
+            usable_rows = self.catalog.computer().usable_gpus
+            usable = [int(g.get("index", 0)) for g in usable_rows]
+            kept = installed_cards(base, usable_rows)
         except Exception:                                    # noqa: BLE001 - a note only: never stop a launch over it
+            return
+        if kept and usable and not all(k in usable for k in kept):
+            # The installed config names a card this PC's card list ignores (an integrated chip beside a card
+            # with memory of its own, a tiny card, a number that names no card here): cards_for_launch chose
+            # again, so saying the model "stays on card 0" would describe a run that does not happen.
+            moved = [int(c) for c in chosen] if chosen else usable
+            where = f"card {kept[0]}" if len(kept) == 1 else "cards " + ", ".join(str(k) for k in kept)
+            onto = f"card {moved[0]}" if len(moved) == 1 else "cards " + ", ".join(str(m) for m in moved)
+            text = (f"The installed config names {where}, which this PC's card list ignores; this start "
+                    f"uses {onto} instead. To keep {onto} from now on: strata launch --gpu "
+                    f"{','.join(str(m) for m in moved)} (it is remembered from then on).")
+            self.notices.append(text)
+            self.emit("config", text, None)
             return
         if not kept or len(usable) <= len(set(kept) & set(usable)):
             return
